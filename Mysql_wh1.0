@@ -1,0 +1,268 @@
+#!/bin/bash
+. /etc/init.d/functions
+#mysqldump="/usr/local/sbin/mysql/mysqldump"
+password="123@xunfang.com"
+USER="root"
+Mysql_port=3306
+Mysql_host=localhost
+Mysql_admin="mysqladmin -u$USER -p$password -P$Mysql_port -h$Mysql_host"
+Mysql_comm="mysql -u$USER -p$password -P$Mysql_port -h$Mysql_host -e"
+$Mysql_comm "show databases" 2> /dev/null #测试查看库
+#下方为数据库全量备份函数
+function db_back (){
+	echo -ne  "\e[32m---------In progress db_back-----------\n\e[39m"	
+
+	backup_dir=/tmp/mydabases
+	backup_filename="mydb-`date +%Y%m%d`.sql"
+	cd $backup_dir
+	mysqldump -u$USER -p$password -A>${backup_dir}/${backup_filename} 2>/dev/null
+	cd ${backup_dir};tar -jcf ${backup_filename}.tar.bz2 ${backup_filename};rm -f ${backup_filename}
+	find ${backup_dir} -mtime +7 -name "*.sql" -exec rm -rf {} \;#保持备份7天的策略
+	action "mysql 全量备份"
+}
+
+#下方为数据库密码策略设置函数
+function db_password_pollicy(){
+	echo -ne "\e[32m----------In progress  db_password_pollicy----------\n\e[39m"
+
+	$Mysql_comm "use mysql;" 2> /dev/null
+	$Mysql_comm "INSTALL PLUGIN CONNECTION_CONTROL SONAME 'connection_control.so';" 2> /dev/null#安装数据库密码策略插件
+	#$Mysql_comm "INSTALL PLUGIN CONNECTION_CONTROL_FAILED_LOGIN_ATTEMPTS SONAME 'connection_control.so';" #安装数据库密码策略插件
+	$Mysql_comm "show variables like 'connection_control%';" 2> /dev/null
+	#connection_control_failed_connections_threshold #单个用户登录失败（由于密码错误引起）次数上限，默认3次
+	#connection_control_max_connection_delay  #失败上限之后再次尝试登录前最大等待时间，单位ms
+	#connection_control_min_connection_delay  #失败上限之后再次尝试登录前最小等待时间，默认1秒（1000ms）
+	#全局策略设置
+	$Mysql_comm "set global connection_control_failed_connections_threshold=5;" 2> /dev/null#单个用户密码错误登录失败次数上限设置为5次
+	$Mysql_comm "set global connection_control_min_connection_delay=30000;" 2> /dev/null #失败上限之后30s之后才能再次尝试登录
+	$Mysql_comm "show variables like 'connection_control%';" 2> /dev/null
+	#查看策略生效情况
+	#$Mysql_comm "use information_schema;"
+	#$Mysql_comm "select * from connection_control_failed_login_attempts;" 
+	#plugin-load=validate_password.so
+	#validate_password_length=8
+	#validate_password=FORCE_PLUS_PERMANENT
+	#过期时间设置 
+	#ALTER USER 'expuser'@'%' PASSWORD EXPIRE INTERVAL 90 DAY;
+	action "mysql 密码过期策略设置完毕"
+}
+
+#下面函数据库审计策略设置函数
+function db_audit (){
+	echo -ne "\e[32m----------In progress  db_audit-----------\e[39m"
+	#数据库永久审计策略
+	#[mysqld]
+	#general_log = on                 on为开启；off为关闭
+	#general_log_file = /data/roma-mysql01.log        	 审计信息存储位置
+	#log_timeauditlog.t_audit to
+
+	$Mysql_comm "show global variables like '%general%';" 2> /dev/null
+	#数据库临时审计策略
+	#cd /var/lib/mysql;touch mysql_audit.log
+	$Mysql_comm "set global general_log=on;" 2> /dev/null#开启审计日志
+	#$Mysql_comm "set global general_log_file=/var/lib/mysql/mysql_audit.log" 2> /dev/null #设置审计日志目录
+	#$Mysql_comm "show global variables like '%general%';" 2> /dev/null
+	$Mysql_comm "create database auditlog;" 2> /dev/null #创建审计库
+	$Mysql_comm "create table auditlog.t_audit(id int not null auto_increment,thread_id int not null,login_time timestamp,localname varchar(50) default null,matchname varchar(50) default null, primary key (id))ENGINE=InnoDB default charset=utf8 comment '审计用户登录信息';" 2> /dev/null
+	$Mysql_comm "show databases;" 2> /dev/null
+	$Mysql_comm "use auditlog;" 2> /dev/null
+	$Mysql_comm "show tables;" 2> /dev/null  
+	$Mysql_comm "desc t_autdit;" 2> /dev/null
+	#创建审计表信息
+	#$Mysql_comm "select concat("grant insert on auditlog.t_audit to '",user,"'@'",host,"';") from mysql.user;" 2> /dev/null        #列出所有授权用户
+	#授权审计账号样例  grant select,insert on auditlog.t_audit to user@localhost identified by 'password';
+	$Mysql_comm "set global init_connect='insert into auditlog.t_audit(id,thread_id,login_time,localname,matchname) values(null,connection_id(),now(),user(),current_user());'" 2> /dev/null #设置init_connect参数，使得审计策略永久生效		
+	$Mysql_comm "show global variables like '%general%';" 2> /dev/null
+
+}
+	#echo -ne "\e[32m	  下方为数据库运维账号新增函数\e[39m"
+function db_account (){
+	echo -ne "\e[32m----------In Progrss db_account-----------\n\e[39m"
+	$Mysql_comm "CREATE USER 'ywm'@localhost IDENTIFIED BY 'Szjc_wh@123';" 2> /dev/null#新增用户ywm
+	$Mysql_comm "CREATE USER 'fzd'@localhost IDENTIFIED BY 'Szjc_wh@123';" 2> /dev/null#新增用户fzd
+	$Mysql_comm "CREATE USER 'lyw'@localhost IDENTIFIED BY 'Szjc_wh@123';" 2> /dev/null#新增用户lyw
+	$Mysql_comm "CREATE USER 'lqy'@localhost IDENTIFIED BY 'Szjc_wh@123';" 2> /dev/null#新增用户lqy
+	$Mysql_comm "CREATE USER 'lic'@localhost IDENTIFIED BY 'Szjc_wh@123';" 2> /dev/null#新增用户lic
+	$Mysql_comm "CREATE USER 'liy'@localhost IDENTIFIED BY 'Szjc_wh@123';" 2> /dev/null#新增用户liy
+	action 	   "新增维护账户6个"
+	$Mysql_comm "Grant select on *.* to ‘ywm’@localhost;" 2> /dev/null#授权查询用户ywm
+	$Mysql_comm "Grant select on *.* to 'fzd'@localhost;" 2> /dev/null#授权查询用户fzd
+	$Mysql_comm "Grant select on *.* to 'lqy'@localhost;" 2> /dev/null#授权查询用户lqy
+	$Mysql_comm "Grant select on *.* to 'lic'@localhost;" 2> /dev/null#授权查询用户lic
+	$Mysql_comm "Grant select on *.* to 'liy'@localhost;" 2> /dev/null#授权查询用户liy
+	$Mysql_comm "Grant select on *.* to 'lyw'@localhost;" 2> /dev/null#授权查询用户lyw
+	action 	   "赋予新增6个维护账户查询授权"
+	$Mysql_comm "ALTER USER ywm@localhost PASSWORD EXPIRE INTERVAL 180 DAY;" 2> /dev/null# 设置用户过期策略 
+	$Mysql_comm "ALTER USER fzd@localhost PASSWORD EXPIRE INTERVAL 180 DAY;" 2> /dev/null# 设置用户过期策略 
+	$Mysql_comm "ALTER USER lyw@localhost PASSWORD EXPIRE INTERVAL 180 DAY;" 2> /dev/null# 设置用户过期策略 
+	$Mysql_comm "ALTER USER lqy@localhost PASSWORD EXPIRE INTERVAL 180 DAY;" 2> /dev/null# 设置用户过期策略 
+	$Mysql_comm "ALTER USER lic@localhost PASSWORD EXPIRE INTERVAL 180 DAY;" 2> /dev/null# 设置用户过期策略 
+	$Mysql_comm "ALTER USER liy@localhost PASSWORD EXPIRE INTERVAL 180 DAY;" 2> /dev/null# 设置用户过期策略 
+	action	   "新增6个维护账户过期策略"
+	$Mysql_comm "select user,host,password_expired,password_lifetime,password_last_changed,account_locked from mysql.user;" 2> /dev/null#所设置用户策略查询
+	$Mysql_comm "grant select,insert on auditlog.t_audit to fzd@localhost identified by 'Szjc_wh@123';" 2> /dev/null#授权数据库审计账户
+	$Mysql_comm "grant select,insert on auditlog.t_audit to ywm@localhost identified by 'Szjc_wh@123';" 2> /dev/null#授权数据库审计账户
+	$Mysql_comm "grant select,insert on auditlog.t_audit to lyw@localhost identified by 'Szjc_wh@123';" 2> /dev/null#授权数据库审计账户
+	$Mysql_comm "grant select,insert on auditlog.t_audit to lqy@localhost identified by 'Szjc_wh@123';" 2> /dev/null#授权数据库审计账户
+	$Mysql_comm "grant select,insert on auditlog.t_audit to lic@localhost identified by 'Szjc_wh@123';" 2> /dev/null#授权数据库审计账户
+	$Mysql_comm "grant select,insert on auditlog.t_audit to liy@localhost identified by 'Szjc_wh@123';" 2> /dev/null#授权数据库审计账户		
+	#$Mysql_comm "select concat("grant insert on auditlog.t_audit to '",user,"'@'",host,"';") from mysql.user;"#列出所有授权审计用户
+	$Mysql_comm "select user,host,insert_priv,select_priv from mysql.user;" 2> /dev/null #授权后用户权限查询
+	action	   "新增6个维护账号审计权限赋予"
+}
+
+	#echo -ne "\e[32m	  下方为数据库全量备份策略回退函数\e[39m"
+function back_off_1(){
+	echo -ne "\e[32m----------In progress back_off_1----------\n\e[39m"
+	cd $backup_dir;rm -f ./*  
+
+	action "全量备份已清除"
+}
+
+	#echo -ne "\e[32m	  下方为数据库密码策略回退函数\e[39m"
+function back_off_2(){
+	echo -ne "\e[32m----------In progres back_off_2-----------\n\e[39m"
+	$Mysql_comm "UNINSTALL PLUGIN CONNECTION_CONTROL_FAILED_LOGIN_ATTEMPTS;" 2> /dev/null
+	$Mysql_comm "UNINSTALL PLUGIN CONNECTION_CONTROL;" 2> /dev/null
+
+	action "密码策略设置插件卸载"
+}
+
+	#echo -ne "\e[32m	  下方为数据库审计策略回退函数\e[39m"
+function back_off_3(){
+	echo -ne "\e[32m----------In progres back_off_3-----------\n\e[39m"
+	rm -rf /var/lib/mysql/*_log
+	cd /var/lib/mysql/ && mkdir bak_log && pwd
+	mv *.log bak_log
+	$Mysql_comm "set global general_log=off;" 2> /dev/null
+	$Mysql_comm "use auditlog;" 2> /dev/null	
+	$Mysql_comm "show tables;" 2> /dev/null
+	$Mysql_comm "drop table t_audit;" 2> /dev/null
+	$Mysql_comm "show tables;" 2> /dev/null
+	$Mysql_comm "show databases;" 2> /dev/null
+	$Mysql_comm "drop database auditlog;" 2> /dev/null
+	$Mysql_comm "show databases;" 2> /dev/null
+	$action "数据库审计策略回退"
+}
+
+	#echo -ne "\e[32m 	  下方为数据库维护账号回退函数\e[39m"
+function back_off_4(){
+	echo -ne "\e[32m----------In progres back_off_4-----------\n\e[39m"
+	$Mysql_comm "select user,host,insert_priv,select_priv from mysql.user;" 2> /dev/null #回收前用户权限查询
+	$Mysql_comm "revoke all on *.* from 'fzd'@'loclalhost';" 2> /dev/null #回收fzd所有权限
+	$Mysql_comm "revoke all on *.* from 'ywm'@'loclalhost';" 2> /dev/null #回收ywm所有权限
+	$Mysql_comm "revoke all on *.* from 'lqy'@'loclalhost';" 2> /dev/null #回收lqy所有权限
+	$Mysql_comm "revoke all on *.* from 'lyw'@'loclalhost';" 2> /dev/null#回收lyw所有权限
+	$Mysql_comm "revoke all on *.* from 'liy'@'loclalhost';" 2> /dev/null#回收liy所有权限
+	$Mysql_comm "revoke all on *.* from 'lic'@'loclalhost';" 2> /dev/null#回收lic所有权限
+	$Mysql_comm "select user,host,insert_priv,select_priv from mysql.user;" 2> /dev/null #回收后用户权限查询
+
+	action "数据库维护账号权限回退"
+	$Mysql_comm "select user,host from mysql.user;" 2> /dev/null #回收前用户查询
+	$Mysql_comm "flush privileges;" 2> /dev/null
+	$Mysql_comm "drop user 'fzd'@localhost;" 2> /dev/null#删除维护账号fzd
+	$Mysql_comm "flush privileges;" 2> /dev/null
+	$Mysql_comm "drop user 'ywm'@localhost;" 2> /dev/null#删除维护账号ywm
+	$Mysql_comm "flush privileges;" 2> /dev/null
+	$Mysql_comm "drop user 'lqy'@localhost;" 2> /dev/null#删除维护账号lqy
+	$Mysql_comm "flush privileges;" 2> /dev/null
+	$Mysql_comm "drop user 'lyw'@localhost;" 2> /dev/null#删除维护账号lyw
+	$Mysql_comm "flush privileges;" 2> /dev/null
+	$Mysql_comm "drop user 'liy'@localhost;" 2> /dev/null#删除维护账号liy
+	$Mysql_comm "flush privileges;" 2> /dev/null
+	$Mysql_comm "drop user 'lic'@localhost;" 2> /dev/null#删除维护账号lic
+	$Mysql_comm "flush privileges;" 2> /dev/null
+	$Mysql_comm "select user,host from mysql.user;" 2> /dev/null#回收后用户查询
+
+	action "数据库维护账号删除"	
+}
+function db_menu (){
+function menu () {
+	cat <<EOF
+	1、The database is backed up regularly #数据库定期备份策略
+	2、Database password policy 	       #数据库密码策略
+	3、Data audit function on 	       #数据库审计策略
+	4、Database account management 	       #数据添加维护用户策略
+	5、Back_off_1 			       #回退1	
+	6、Back_off_2 			       #回退2
+	7、Back_off_3 			       #回退3
+	8、Back_off_4 			       #回退4
+	9、orther			       #其它退出脚本 *
+EOF
+}
+echo -ne '\e[32m 选择下列项进行配置: \n \e[39m'
+PS3="please select your dabases menu:"
+select i in "db_back" "db_password_pollicy" "db_audit" "db_account" "back_off_1" "back_off_2" "back_off_3" "back_off_4" "other"  
+do 
+case $i in
+	db_back)
+		db_back
+		echo -ne "\e[32m Please select the menu again:\n\e[39m"
+		menu
+		;;
+	db_password_pollicy)
+		db_password_pollicy
+		echo -ne "\e[32m Please select the menu again:\n\e[39m"
+		menu
+		;;
+	db_audit)
+		db_audit
+		echo -ne "\e[32m Please select the menu again:\n\e[39m"
+		menu
+		;;
+	db_account)
+		db_account
+		echo -ne "\e[32m Please select the menu again:\n\e[39m"
+		menu
+		;;
+	back_off_1)
+		back_off_1
+		echo -ne "\e[32m Please select the menu again\n\e[39m"
+		menu
+		;;
+	back_off_2)
+		back_off_2
+		echo -ne "\e[32m Please select the menu again:\n\e[39m"
+		menu
+		;;
+	back_off_3)	
+		back_off_3
+		echo -ne "\e[32m Please select the menu again:\n\e[39m"
+		menu
+		;;
+	back_off_4)
+		back_off_4
+		echo -ne "\e[32m Please select the menu again:\n\e[39m"
+		menu
+		;;
+	*)
+		echo -ne "\e[031m Please select the menu item \e[039m"
+		exit
+		;;
+esac
+done	
+}
+echo "db_back or db_menu"
+#read -p "please select $1 or $2: " number
+case $number in
+        $1)
+                db_back
+                ;;
+        $2)
+                db_menu
+                ;;
+        *)
+                echo "please select db_back or db_menu"
+                ;;
+esac
+#db_back
+#db_menu
+
+
+
+
+
+
+
+
+
